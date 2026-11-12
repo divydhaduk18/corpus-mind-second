@@ -1,0 +1,51 @@
+# Python Cache
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.ipynb_checkpoints/
+
+# Virtual Environment
+venv/
+.venv/
+env/
+
+# Environment Variables / Secrets
+.env
+.env.*
+!.env.example
+
+# Local Data
+data/
+
+# Uploads
+uploads/*
+!uploads/.gitkeep
+
+# Vector Store
+vector_store/*
+!vector_store/.gitkeep
+
+# Logs
+logs/*
+!logs/.gitkeep
+
+# IDEs
+.vscode/
+.idea/
+
+# OS Files
+.DS_Store
+Thumbs.db
+
+# Python Build / Distribution
+build/
+dist/
+*.egg-info/
+
+# Jupyter
+*.ipynb_checkpoints/
+
+# Temporary Files
+*.tmp
+*.temp
