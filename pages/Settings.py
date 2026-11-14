@@ -10,6 +10,8 @@ import config
 from utils.auth import AuthManager
 from utils.ocr import OCRManager
 from utils.database import db
+from utils.llm_provider import LLMProviderManager
+from utils.prompt_manager import PromptManager
 
 # Guard Page Access
 AuthManager.require_auth()
@@ -190,22 +192,93 @@ else:
         enable_compression = st.checkbox("Contextual Compression", value=getattr(config, "CONTEXTUAL_COMPRESSION_ENABLED", True))
         enable_hallucination = st.checkbox("Hallucination Detection", value=getattr(config, "HALLUCINATION_DETECTION_ENABLED", True))
 
-    ollama_url = st.text_input(
-        "Ollama API URL Endpoint",
-        value=config.OLLAMA_API_URL
-    )
-    
-    if st.button("🔌 Test Ollama Connection", use_container_width=True):
-        try:
-            response = requests.get(f"{ollama_url}/api/tags", timeout=3)
-            if response.status_code == 200:
-                st.success("✅ Connected to Ollama Service successfully!")
-                models = [m['name'] for m in response.json().get('models', [])]
-                st.info(f"Available local models: {', '.join(models)}")
+    # ---------------- 5. MULTI-PROVIDER LLM & CLOUD SETTINGS ----------------
+    st.markdown("---")
+    st.subheader("🤖 Multi-Provider LLM & Cloud Settings (Improvements #11 - #15)")
+
+    llm_prov_col1, llm_prov_col2 = st.columns(2)
+    with llm_prov_col1:
+        provider_choices = ["ollama", "openai", "gemini", "anthropic"]
+        curr_provider = getattr(config, "DEFAULT_LLM_PROVIDER", "ollama")
+        prov_idx = provider_choices.index(curr_provider) if curr_provider in provider_choices else 0
+        selected_llm_provider = st.selectbox(
+            "Default Active LLM Provider",
+            options=provider_choices,
+            index=prov_idx,
+            format_func=lambda x: {
+                "ollama": "🦙 Ollama (Local)",
+                "openai": "🟢 OpenAI API (Cloud / GPT-4o)",
+                "gemini": "✨ Google Gemini API (Cloud)",
+                "anthropic": "🟣 Anthropic Claude API (Cloud)"
+            }.get(x, x.title())
+        )
+    with llm_prov_col2:
+        prov_models = LLMProviderManager.get_models_for_provider(selected_llm_provider)
+        selected_prov_model = st.selectbox("Default Model for Active Provider", options=prov_models, index=0)
+
+    # Provider Specific Credentials & Endpoints
+    prov_tab_names = ["🦙 Ollama Local", "🟢 OpenAI", "✨ Google Gemini", "🟣 Anthropic"]
+    tab_ollama, tab_openai, tab_gemini, tab_anthropic = st.tabs(prov_tab_names)
+
+    with tab_ollama:
+        ollama_url = st.text_input("Ollama Base URL", value=getattr(config, "OLLAMA_API_URL", "http://localhost:11434"))
+        if st.button("🔌 Test Ollama Connection", key="test_ollama_btn", use_container_width=True):
+            ok, msg = LLMProviderManager.get_provider("ollama").test_connection()
+            if ok:
+                st.success(f"✅ {msg}")
             else:
-                st.warning(f"Ollama responded with status code {response.status_code}.")
-        except Exception as e:
-            st.error(f"❌ Failed to reach Ollama at {ollama_url}: {e}")
+                st.error(f"❌ {msg}")
+
+    with tab_openai:
+        openai_key = st.text_input("OpenAI API Key", value=getattr(config, "OPENAI_API_KEY", ""), type="password", help="Stored securely in .env; never logged or exposed.")
+        openai_base = st.text_input("OpenAI Base URL (Optional for Groq/OpenRouter)", value=getattr(config, "OPENAI_BASE_URL", "https://api.openai.com/v1"))
+        if st.button("🔌 Test OpenAI Connection", key="test_openai_btn", use_container_width=True):
+            # Temporarily set key for test
+            prov = LLMProviderManager.get_provider("openai")
+            prov.api_key = openai_key
+            prov.base_url = openai_base.rstrip("/")
+            ok, msg = prov.test_connection()
+            if ok:
+                st.success(f"✅ {msg}")
+            else:
+                st.error(f"❌ {msg}")
+
+    with tab_gemini:
+        gemini_key = st.text_input("Google Gemini API Key", value=getattr(config, "GEMINI_API_KEY", ""), type="password", help="Stored securely in .env.")
+        if st.button("🔌 Test Gemini Connection", key="test_gemini_btn", use_container_width=True):
+            prov = LLMProviderManager.get_provider("gemini")
+            prov.api_key = gemini_key
+            ok, msg = prov.test_connection()
+            if ok:
+                st.success(f"✅ {msg}")
+            else:
+                st.error(f"❌ {msg}")
+
+    with tab_anthropic:
+        anthropic_key = st.text_input("Anthropic Claude API Key", value=getattr(config, "ANTHROPIC_API_KEY", ""), type="password", help="Stored securely in .env.")
+        if st.button("🔌 Test Anthropic Connection", key="test_anthropic_btn", use_container_width=True):
+            prov = LLMProviderManager.get_provider("anthropic")
+            prov.api_key = anthropic_key
+            ok, msg = prov.test_connection()
+            if ok:
+                st.success(f"✅ {msg}")
+            else:
+                st.error(f"❌ {msg}")
+
+    # Global LLM Parameters
+    st.markdown("##### ⚙️ Generation Parameters & Prompt Engine")
+    param_col1, param_col2, param_col3 = st.columns(3)
+    with param_col1:
+        default_temp = st.slider("Default Temperature", min_value=0.0, max_value=1.2, value=float(getattr(config, "DEFAULT_TEMPERATURE", 0.7)), step=0.05)
+    with param_col2:
+        default_max_tok = st.slider("Default Max Output Tokens", min_value=64, max_value=4096, value=int(getattr(config, "DEFAULT_MAX_TOKENS", 512)), step=64)
+    with param_col3:
+        llm_timeout_sec = st.number_input("Request Timeout (Seconds)", min_value=10, max_value=300, value=int(getattr(config, "LLM_REQUEST_TIMEOUT", 60)), step=10)
+
+    prompt_templates_list = list(PromptManager.list_templates().keys())
+    curr_template = getattr(config, "DEFAULT_PROMPT_TEMPLATE", "question_answering")
+    t_idx = prompt_templates_list.index(curr_template) if curr_template in prompt_templates_list else 0
+    default_template_sel = st.selectbox("Default Prompt Template", options=prompt_templates_list, index=t_idx)
 
     session_timeout = st.number_input(
         "Session Idle Timeout Limit (Minutes)",
@@ -266,7 +339,27 @@ else:
         dotenv.set_key(str(env_file), "CONTEXTUAL_COMPRESSION_ENABLED", str(enable_compression).lower())
         dotenv.set_key(str(env_file), "HALLUCINATION_DETECTION_ENABLED", str(enable_hallucination).lower())
         
+        # Save Multi-Provider LLM & Cloud configurations
+        dotenv.set_key(str(env_file), "DEFAULT_LLM_PROVIDER", selected_llm_provider)
+        dotenv.set_key(str(env_file), "OPENAI_API_KEY", openai_key)
+        dotenv.set_key(str(env_file), "OPENAI_BASE_URL", openai_base)
+        dotenv.set_key(str(env_file), "GEMINI_API_KEY", gemini_key)
+        dotenv.set_key(str(env_file), "ANTHROPIC_API_KEY", anthropic_key)
+        dotenv.set_key(str(env_file), "DEFAULT_TEMPERATURE", str(default_temp))
+        dotenv.set_key(str(env_file), "DEFAULT_MAX_TOKENS", str(default_max_tok))
+        dotenv.set_key(str(env_file), "LLM_REQUEST_TIMEOUT", str(llm_timeout_sec))
+        dotenv.set_key(str(env_file), "DEFAULT_PROMPT_TEMPLATE", default_template_sel)
+
         config.OLLAMA_API_URL = ollama_url
+        config.DEFAULT_LLM_PROVIDER = selected_llm_provider
+        config.OPENAI_API_KEY = openai_key
+        config.OPENAI_BASE_URL = openai_base
+        config.GEMINI_API_KEY = gemini_key
+        config.ANTHROPIC_API_KEY = anthropic_key
+        config.DEFAULT_TEMPERATURE = default_temp
+        config.DEFAULT_MAX_TOKENS = default_max_tok
+        config.LLM_REQUEST_TIMEOUT = llm_timeout_sec
+        config.DEFAULT_PROMPT_TEMPLATE = default_template_sel
         config.SESSION_TIMEOUT_MINUTES = session_timeout
         config.DEFAULT_EMBEDDING_MODEL = selected_emb_model
         config.DEFAULT_RERANKER_MODEL = selected_reranker

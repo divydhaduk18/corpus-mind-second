@@ -125,7 +125,7 @@ if is_admin:
 else:
     # ---------------- USER VIEW ----------------
     st.subheader("🚀 User Quick Navigation")
-    quick_col1, quick_col2, quick_col3 = st.columns(3)
+    quick_col1, quick_col2, quick_col3, quick_col4 = st.columns(4)
     with quick_col1:
         if st.button("🤖 Start Assistant Chat", type="primary", use_container_width=True):
             st.switch_page("pages/Chat.py")
@@ -135,6 +135,9 @@ else:
     with quick_col3:
         if st.button("📊 View Usage Analytics", use_container_width=True):
             st.switch_page("pages/Analytics.py")
+    with quick_col4:
+        if st.button("⚡ LLM Benchmarking", use_container_width=True):
+            st.switch_page("pages/LLM_Benchmark.py")
 
     st.markdown("---")
 

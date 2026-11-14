@@ -117,6 +117,29 @@ THEMES = {
     "Light Mode": "light"
 }
 
+# 11. Multi-Provider LLM Configurations (Ollama, OpenAI, Gemini, Anthropic)
+DEFAULT_LLM_PROVIDER = os.environ.get("DEFAULT_LLM_PROVIDER", "ollama")
+OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY", "")
+OPENAI_BASE_URL = os.environ.get("OPENAI_BASE_URL", "https://api.openai.com/v1")
+DEFAULT_OPENAI_MODEL = os.environ.get("DEFAULT_OPENAI_MODEL", "gpt-4o-mini")
+
+GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", os.environ.get("GOOGLE_API_KEY", ""))
+DEFAULT_GEMINI_MODEL = os.environ.get("DEFAULT_GEMINI_MODEL", "gemini-1.5-flash")
+
+ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
+DEFAULT_ANTHROPIC_MODEL = os.environ.get("DEFAULT_ANTHROPIC_MODEL", "claude-3-5-haiku-20241022")
+
+LLM_REQUEST_TIMEOUT = int(os.environ.get("LLM_REQUEST_TIMEOUT", 60))
+DEFAULT_TEMPERATURE = float(os.environ.get("DEFAULT_TEMPERATURE", 0.7))
+DEFAULT_MAX_TOKENS = int(os.environ.get("DEFAULT_MAX_TOKENS", 512))
+
+# 12 & 13 & 15. Benchmarks, Structured Output & Prompts
+DEFAULT_PROMPT_TEMPLATE = os.environ.get("DEFAULT_PROMPT_TEMPLATE", "question_answering")
+STRUCTURED_OUTPUT_ENABLED = os.environ.get("STRUCTURED_OUTPUT_ENABLED", "false").lower() in ("true", "1", "yes")
+DEFAULT_STRUCTURED_SCHEMA = os.environ.get("DEFAULT_STRUCTURED_SCHEMA", "general")
+BENCHMARK_RESULTS_DIR = DATA_DIR / "benchmarks"
+BENCHMARK_RESULTS_DIR.mkdir(parents=True, exist_ok=True)
+
 # Personalities for the Assistant
 ASSISTANT_PERSONALITIES = {
     "Professional": (

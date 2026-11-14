@@ -13,6 +13,9 @@ from utils.rag import RAGManager
 from utils.export import ExportManager
 from utils.conversation_rag import ConversationRAGManager
 from utils.hallucination_detector import HallucinationDetector
+from utils.llm_provider import LLMProviderManager, LLMStreamChunk
+from utils.prompt_manager import PromptManager
+from utils.structured_output import StructuredOutputParser, SCHEMA_REGISTRY
 
 # Guard Page Access
 # If not authenticated, require_auth will stop execution and redirect to app.py
@@ -96,11 +99,52 @@ with st.sidebar:
         st.stop()
 
     st.markdown("---")
-    st.subheader("⚙️ AI & RAG Configuration")
+    st.subheader("⚙️ Multi-Provider LLM & RAG Engine")
     
-    # Model Selection
-    available_models = OllamaChatManager.get_available_models()
+    # 1. LLM Provider & Model Selection
+    prov_choices = LLMProviderManager.list_providers()
+    def_prov = getattr(config, "DEFAULT_LLM_PROVIDER", "ollama")
+    prov_def_idx = prov_choices.index(def_prov) if def_prov in prov_choices else 0
+    selected_provider = st.selectbox(
+        "LLM Provider",
+        options=prov_choices,
+        index=prov_def_idx,
+        format_func=lambda x: {
+            "ollama": "🦙 Ollama (Local)",
+            "openai": "🟢 OpenAI API (Cloud)",
+            "gemini": "✨ Google Gemini (Cloud)",
+            "anthropic": "🟣 Anthropic Claude (Cloud)"
+        }.get(x, x.title())
+    )
+    
+    available_models = LLMProviderManager.get_models_for_provider(selected_provider)
     selected_model = st.selectbox("LLM Model", options=available_models, index=0)
+
+    # 2. Specialized Prompt Template Selection
+    prompt_templates = PromptManager.list_templates()
+    template_keys = list(prompt_templates.keys())
+    def_temp = getattr(config, "DEFAULT_PROMPT_TEMPLATE", "question_answering")
+    t_def_idx = template_keys.index(def_temp) if def_temp in template_keys else 0
+    selected_prompt_template = st.selectbox(
+        "Document Task Prompt",
+        options=template_keys,
+        index=t_def_idx,
+        format_func=lambda x: f"{x.replace('_', ' ').title()} (v{prompt_templates[x]['version']})"
+    )
+
+    # 3. Output Mode: Conversational vs Structured JSON
+    response_mode = st.radio(
+        "Response Mode",
+        options=["Conversational", "Structured JSON"],
+        horizontal=True
+    )
+    selected_schema = "general"
+    if response_mode == "Structured JSON":
+        selected_schema = st.selectbox(
+            "Target JSON Schema",
+            options=["general", "invoice", "resume", "contract", "research"],
+            format_func=lambda x: f"📑 {x.title()} Schema"
+        )
     
     # RAG Search Mode Selection
     rag_search_mode_ui = st.selectbox(
@@ -420,7 +464,8 @@ if messages and messages[-1]['role'] == 'user':
             query=last_user_msg,
             rag_chunks=rag_results,
             personality_prompt=system_prompt,
-            context_budget_tokens=ctx_len
+            context_budget_tokens=ctx_len,
+            template_name=selected_prompt_template
         )
         citations.extend(doc_citations)
         if web_context:
@@ -437,6 +482,12 @@ if messages and messages[-1]['role'] == 'user':
     else:
         sys_instruction = system_prompt
         augmented_prompt = last_user_msg
+
+    # Append Structured JSON instructions if Structured Output mode is active
+    if response_mode == "Structured JSON":
+        schema_cls = StructuredOutputParser.get_schema_class(selected_schema)
+        schema_guide = StructuredOutputParser.get_schema_json_instructions(schema_cls)
+        augmented_prompt += f"\n\n{schema_guide}"
         
     # Add grounded system prompt
     chat_messages.append({"role": "system", "content": sys_instruction})
@@ -459,38 +510,65 @@ if messages and messages[-1]['role'] == 'user':
     
     full_response = ""
     start_time = time.time()
+    ttft_recorded = 0.0
+    token_count = 0
     
-    # Stream Response
-    response_generator = OllamaChatManager.generate_chat_response(
+    # Stream Response via Unified LLM Provider Manager
+    response_generator = LLMProviderManager.stream_chat(
+        provider_name=selected_provider,
         model=selected_model,
         messages=chat_messages,
         settings={
             "temperature": temp,
             "max_tokens": max_tok,
             "top_p": top_p,
-            "context_length": ctx_len
+            "context_length": ctx_len,
+            "json_mode": (response_mode == "Structured JSON")
         }
     )
     
     # Process generator output and update UI live
     for chunk in response_generator:
-        full_response += chunk
-        # Format live response view
-        assistant_bubble_placeholder.markdown(
-            f"""
-            <div class="chat-bubble chat-bubble-assistant">
-                <div class="chat-avatar chat-avatar-assistant">AI</div>
-                <div class="chat-message-content">
-                    <strong>Assistant ({selected_model})</strong>
-                    <div style="margin-top: 5px;">{full_response}▌</div>
+        if st.session_state.get("stop_generation", False):
+            break
+        if chunk.error:
+            full_response += f"\n\n⚠️ **Generation Error:** {chunk.error}"
+            break
+        if chunk.is_first_token and chunk.ttft_ms:
+            ttft_recorded = chunk.ttft_ms
+        if chunk.text:
+            full_response += chunk.text
+            token_count += 1
+            # Format live response view
+            assistant_bubble_placeholder.markdown(
+                f"""
+                <div class="chat-bubble chat-bubble-assistant">
+                    <div class="chat-avatar chat-avatar-assistant">AI</div>
+                    <div class="chat-message-content">
+                        <strong>Assistant ({selected_provider.upper()} - {selected_model})</strong>
+                        <div style="margin-top: 5px;">{full_response}▌</div>
+                    </div>
                 </div>
-            </div>
-            """,
-            unsafe_allow_html=True
-        )
+                """,
+                unsafe_allow_html=True
+            )
         
     end_time = time.time()
     duration_ms = int((end_time - start_time) * 1000)
+    tps = round(token_count / (duration_ms / 1000.0), 1) if duration_ms > 0 else 0.0
+
+    # Structured Output Validation and formatting
+    if response_mode == "Structured JSON":
+        schema_cls = StructuredOutputParser.get_schema_class(selected_schema)
+        parsed_obj, parse_err, raw_json = StructuredOutputParser.validate_and_parse(full_response, schema_cls)
+        if parsed_obj is not None:
+            pretty_json = json.dumps(raw_json, indent=2)
+            full_response = (
+                f"✅ **Structured JSON Output Verified** (`{selected_schema.title()}` Schema):\n\n"
+                f"```json\n{pretty_json}\n```"
+            )
+        else:
+            full_response += f"\n\n> ⚠️ *Structured JSON Warning: {parse_err}*"
     
     # Add Citations/References if any
     if citations:
@@ -498,7 +576,7 @@ if messages and messages[-1]['role'] == 'user':
         full_response += citation_text
 
     # Verify Answer with Hallucination Detector
-    if rag_results and getattr(config, "HALLUCINATION_DETECTION_ENABLED", True):
+    if rag_results and getattr(config, "HALLUCINATION_DETECTION_ENABLED", True) and response_mode != "Structured JSON":
         v_res = HallucinationDetector.verify_answer(
             query=last_user_msg,
             answer=full_response,
@@ -516,6 +594,16 @@ if messages and messages[-1]['role'] == 'user':
         full_response += badge_text
         if v_res.get("qualification_warning"):
             full_response += f"\n> ⚠️ *{v_res['qualification_warning']}*"
+
+    # Append Streaming & Generation Metrics Badge
+    perf_badge = (
+        f"\n\n---\n"
+        f"<small style='color: #64748b;'>⚡ TTFT: <b>{ttft_recorded:.0f} ms</b> | "
+        f"🚀 Speed: <b>{tps} tok/s</b> | "
+        f"⏱️ Total: <b>{duration_ms} ms</b> | "
+        f"🏷️ <b>{selected_provider.upper()} ({selected_model})</b></small>"
+    )
+    full_response += perf_badge
         
     # Finalize UI representation (remove typing cursor)
     assistant_bubble_placeholder.markdown(
@@ -523,7 +611,7 @@ if messages and messages[-1]['role'] == 'user':
         <div class="chat-bubble chat-bubble-assistant">
             <div class="chat-avatar chat-avatar-assistant">AI</div>
             <div class="chat-message-content">
-                <strong>Assistant ({selected_model})</strong>
+                <strong>Assistant ({selected_provider.upper()} - {selected_model})</strong>
                 <div style="margin-top: 5px;">{full_response}</div>
             </div>
         </div>
