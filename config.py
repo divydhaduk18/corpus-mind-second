@@ -95,8 +95,25 @@ OCR_MAX_IMAGE_DIM = int(os.environ.get("OCR_MAX_IMAGE_DIM", 2000))
 TESSERACT_CMD_PATH = os.environ.get("TESSERACT_CMD_PATH", r"C:/Program Files/Tesseract-OCR/tesseract.exe")
 
 # Supported Document & Image Formats
-SUPPORTED_DOC_EXTENSIONS = {".pdf", ".docx", ".txt", ".md", ".csv", ".json"}
+SUPPORTED_DOC_EXTENSIONS = {".pdf", ".docx", ".txt", ".md", ".csv", ".json", ".xlsx", ".xls"}
 SUPPORTED_IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".webp", ".bmp", ".tiff"}
+
+# 16-22. Advanced Document Intelligence Configurations
+EXTRACTED_TABLES_DIR = DATA_DIR / "tables"
+EXTRACTED_IMAGES_DIR = DATA_DIR / "images"
+SUMMARIES_DIR = DATA_DIR / "summaries"
+for d in [EXTRACTED_TABLES_DIR, EXTRACTED_IMAGES_DIR, SUMMARIES_DIR]:
+    d.mkdir(parents=True, exist_ok=True)
+
+SUPPORTED_OCR_LANGUAGES = {
+    "eng": "English",
+    "hin": "Hindi (हिंदी)",
+    "guj": "Gujarati (ગુજરાતી)"
+}
+DEFAULT_OCR_LANGUAGE = os.environ.get("DEFAULT_OCR_LANGUAGE", "eng")
+ENABLE_TABLE_EXTRACTION_ON_UPLOAD = os.environ.get("ENABLE_TABLE_EXTRACTION_ON_UPLOAD", "true").lower() in ("true", "1", "yes")
+ENABLE_IMAGE_EXTRACTION_ON_UPLOAD = os.environ.get("ENABLE_IMAGE_EXTRACTION_ON_UPLOAD", "true").lower() in ("true", "1", "yes")
+VISION_MODEL_NAME = os.environ.get("VISION_MODEL_NAME", "gpt-4o-mini")
 
 # User-Scoped Paths to Enforce Multi-Tenant Document Isolation
 def get_user_uploads_dir(user_id: int) -> Path:

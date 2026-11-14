@@ -265,6 +265,22 @@ class DocumentLoader:
             logger.error(f"JSON extraction failed for {file_path}: {e}")
             return DocumentLoader.load_txt(file_path)
 
+    @staticmethod
+    def load_excel(file_path: str) -> str:
+        """Extract multi-sheet text and table data from Excel workbook."""
+        from utils.excel_intelligence import ExcelWorkbookManager
+        try:
+            sheets = ExcelWorkbookManager.load_workbook_sheets(file_path)
+            parts = []
+            for sheet_name, df in sheets.items():
+                parts.append(f"--- Worksheet: {sheet_name} ({len(df)} rows, {len(df.columns)} columns) ---")
+                if not df.empty:
+                    parts.append(df.to_markdown(index=False))
+            return "\n\n".join(parts)
+        except Exception as e:
+            logger.error(f"Excel extraction failed for {file_path}: {e}")
+            return ""
+
     @classmethod
     def load_document_pages(cls, file_path: str) -> List[Dict[str, Any]]:
         """Return structured page-by-page data for any supported document or image."""
@@ -277,6 +293,23 @@ class DocumentLoader:
 
         if ext == ".pdf":
             return cls.load_pdf_pages(file_path)
+        elif ext in [".xlsx", ".xls"]:
+            from utils.excel_intelligence import ExcelWorkbookManager
+            try:
+                sheets = ExcelWorkbookManager.load_workbook_sheets(file_path)
+                pages = []
+                for p_idx, (sheet_name, df) in enumerate(sheets.items(), start=1):
+                    pages.append({
+                        "page_number": p_idx,
+                        "text": f"Worksheet: {sheet_name}\n" + df.to_markdown(index=False),
+                        "is_ocr": False,
+                        "file_name": file_name,
+                        "sheet_name": sheet_name
+                    })
+                return pages if pages else [{"page_number": 1, "text": "", "is_ocr": False, "file_name": file_name}]
+            except Exception as e:
+                logger.error(f"Excel sheets loading failed for {file_path}: {e}")
+                return [{"page_number": 1, "text": "", "is_ocr": False, "file_name": file_name}]
         elif ext in config.SUPPORTED_IMAGE_EXTENSIONS:
             text = cls.load_image(file_path)
             return [{
@@ -306,6 +339,8 @@ class DocumentLoader:
         ext = path.suffix.lower()
         if ext == ".pdf":
             return cls.load_pdf(file_path)
+        elif ext in [".xlsx", ".xls"]:
+            return cls.load_excel(file_path)
         elif ext == ".docx":
             return cls.load_docx(file_path)
         elif ext == ".txt":

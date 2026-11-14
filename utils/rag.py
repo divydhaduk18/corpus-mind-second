@@ -401,6 +401,48 @@ class RAGManager:
                 c["category"] = category
             all_chunks.extend(chunks)
 
+            # Ingest extracted PDF tables as dedicated high-saliency RAG chunks
+            if ext == ".pdf" and getattr(config, "ENABLE_TABLE_EXTRACTION_ON_UPLOAD", True):
+                try:
+                    from utils.table_extractor import TableExtractor
+                    tables = TableExtractor.extract_tables_from_pdf(f_path)
+                    for t in tables:
+                        t_passage = t.to_rag_passage()
+                        if t_passage.strip():
+                            all_chunks.append({
+                                "text": t_passage,
+                                "doc_id": doc['id'],
+                                "user_id": user_id,
+                                "file_name": doc['file_name'],
+                                "page_number": t.page_number,
+                                "section": f"Table {t.table_id}",
+                                "file_type": "Table Data",
+                                "category": category
+                            })
+                except Exception as t_err:
+                    logger.debug(f"Table ingestion error for {doc['file_name']}: {t_err}")
+
+            # Ingest extracted PDF figures / charts as visual RAG chunks
+            if ext == ".pdf" and getattr(config, "ENABLE_IMAGE_EXTRACTION_ON_UPLOAD", True):
+                try:
+                    from utils.visual_rag import VisualRAGManager
+                    figures = VisualRAGManager.extract_figures_from_pdf(f_path, user_id=user_id, generate_descriptions=True)
+                    for fig in figures:
+                        f_passage = fig.to_rag_passage()
+                        if f_passage.strip():
+                            all_chunks.append({
+                                "text": f_passage,
+                                "doc_id": doc['id'],
+                                "user_id": user_id,
+                                "file_name": doc['file_name'],
+                                "page_number": fig.page_number,
+                                "section": f"Figure {fig.figure_id} ({fig.figure_type})",
+                                "file_type": "Visual Diagram",
+                                "category": category
+                            })
+                except Exception as f_err:
+                    logger.debug(f"Visual figure ingestion error for {doc['file_name']}: {f_err}")
+
         if not all_chunks:
             cls.invalidate_cache(user_id)
             return True, len(user_docs), 0

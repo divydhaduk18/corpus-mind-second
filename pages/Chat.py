@@ -51,6 +51,10 @@ with st.sidebar:
         st.markdown("")
         if st.button("🛡️ Admin Panel", use_container_width=True):
             st.switch_page("pages/Admin.py")
+            
+    st.markdown("")
+    if st.button("🛠️ Document Tools (16–22)", use_container_width=True):
+        st.switch_page("pages/Document_Tools.py")
 
     st.markdown("---")
     st.subheader("💬 Chat Sessions")
