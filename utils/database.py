@@ -101,6 +101,44 @@ class DatabaseManager:
                 FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
             )
             """)
+
+            # 26. Asynchronous Background Document Jobs Table
+            cursor.execute("""
+            CREATE TABLE IF NOT EXISTS document_jobs (
+                job_id TEXT PRIMARY KEY,
+                user_id INTEGER NOT NULL,
+                file_name TEXT NOT NULL,
+                file_path TEXT NOT NULL,
+                status TEXT DEFAULT 'queued',
+                progress_pct INTEGER DEFAULT 0,
+                current_stage TEXT DEFAULT 'queued',
+                error_message TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+            )
+            """)
+
+            # 23. RAGAS Evaluation Results Table
+            cursor.execute("""
+            CREATE TABLE IF NOT EXISTS ragas_evaluations (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL,
+                dataset_name TEXT NOT NULL,
+                provider TEXT NOT NULL,
+                model TEXT NOT NULL,
+                embedding_model TEXT NOT NULL,
+                avg_faithfulness REAL DEFAULT 0.0,
+                avg_answer_relevancy REAL DEFAULT 0.0,
+                avg_context_precision REAL DEFAULT 0.0,
+                avg_context_recall REAL DEFAULT 0.0,
+                avg_answer_correctness REAL DEFAULT 0.0,
+                avg_context_utilization REAL DEFAULT 0.0,
+                metrics_json TEXT,
+                timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+            )
+            """)
             
             conn.commit()
             logger.info("Database tables initialized successfully.")
@@ -336,6 +374,82 @@ class DatabaseManager:
                 "model_usage": model_usage,
                 "msg_history": msg_history
             }
+
+    # 26. Asynchronous Background Document Job Operations
+    def create_document_job(self, job_id: str, user_id: int, file_name: str, file_path: str) -> bool:
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                """INSERT OR REPLACE INTO document_jobs 
+                   (job_id, user_id, file_name, file_path, status, progress_pct, current_stage) 
+                   VALUES (?, ?, ?, ?, 'queued', 0, 'queued')""",
+                (job_id, user_id, file_name, file_path)
+            )
+            conn.commit()
+            return True
+
+    def update_document_job(self, job_id: str, status: str, progress_pct: int, current_stage: str, error_message: Optional[str] = None) -> bool:
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                """UPDATE document_jobs 
+                   SET status = ?, progress_pct = ?, current_stage = ?, error_message = ?, updated_at = CURRENT_TIMESTAMP 
+                   WHERE job_id = ?""",
+                (status, progress_pct, current_stage, error_message, job_id)
+            )
+            conn.commit()
+            return True
+
+    def get_document_jobs_by_user(self, user_id: int) -> List[Dict[str, Any]]:
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT * FROM document_jobs WHERE user_id = ? ORDER BY created_at DESC LIMIT 50",
+                (user_id,)
+            )
+            rows = cursor.fetchall()
+            return [dict(r) for r in rows]
+
+    def get_document_job_by_id(self, job_id: str) -> Optional[Dict[str, Any]]:
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT * FROM document_jobs WHERE job_id = ?", (job_id,))
+            row = cursor.fetchone()
+            return dict(row) if row else None
+
+    # 23. RAGAS Evaluation Operations
+    def save_ragas_evaluation(self, user_id: int, dataset_name: str, provider: str, model: str, embedding_model: str, metrics: Dict[str, Any]) -> int:
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            import json
+            cursor.execute(
+                """INSERT INTO ragas_evaluations 
+                   (user_id, dataset_name, provider, model, embedding_model, avg_faithfulness, 
+                    avg_answer_relevancy, avg_context_precision, avg_context_recall, avg_answer_correctness, avg_context_utilization, metrics_json) 
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (
+                    user_id, dataset_name, provider, model, embedding_model,
+                    metrics.get("faithfulness", 0.0),
+                    metrics.get("answer_relevancy", 0.0),
+                    metrics.get("context_precision", 0.0),
+                    metrics.get("context_recall", 0.0),
+                    metrics.get("answer_correctness", 0.0),
+                    metrics.get("context_utilization", 0.0),
+                    json.dumps(metrics)
+                )
+            )
+            conn.commit()
+            return cursor.lastrowid
+
+    def get_ragas_evaluations_by_user(self, user_id: int) -> List[Dict[str, Any]]:
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT * FROM ragas_evaluations WHERE user_id = ? ORDER BY timestamp DESC LIMIT 30",
+                (user_id,)
+            )
+            rows = cursor.fetchall()
+            return [dict(r) for r in rows]
 
 # Create globally accessible manager instance
 db = DatabaseManager()

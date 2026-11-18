@@ -85,10 +85,40 @@ with tab_upload:
         index=0,
         help="Tag your uploaded documents with a category to enable filtered retrieval."
     )
+    
+    async_mode = st.checkbox(
+        "⚡ Process Asynchronously in Background (Non-blocking)",
+        value=False,
+        help="Dispatches ingestion to background workers so you can continue using the application."
+    )
 
     if st.button("🚀 Process & Index Files for RAG", type="primary", use_container_width=True):
         if not uploaded_files:
             st.warning("Please upload at least one document or image file first.")
+        elif async_mode:
+            from utils.async_processor import AsyncDocumentProcessor
+            user_upload_dir = config.get_user_uploads_dir(user_id)
+            queued_jobs = []
+            for uploaded_file in uploaded_files:
+                file_name = uploaded_file.name
+                file_bytes = uploaded_file.getvalue()
+                safe_storage_name = f"{int(time.time() * 1000)}_{Path(file_name).name}"
+                save_path = user_upload_dir / safe_storage_name
+                with open(save_path, "wb") as f:
+                    f.write(file_bytes)
+                
+                j_id = AsyncDocumentProcessor.submit_document_job(
+                    user_id=user_id,
+                    file_name=file_name,
+                    file_path=str(save_path),
+                    category=doc_category
+                )
+                queued_jobs.append(j_id)
+            
+            st.success(f"🚀 Submitted {len(queued_jobs)} document(s) to the background worker queue!")
+            st.info("You can monitor live progress and ingestion stages under **Performance & Evaluation > Async Job Queue**.")
+            time.sleep(1.5)
+            st.rerun()
         else:
             success_count = 0
             user_upload_dir = config.get_user_uploads_dir(user_id)

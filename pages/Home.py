@@ -125,7 +125,7 @@ if is_admin:
 else:
     # ---------------- USER VIEW ----------------
     st.subheader("🚀 User Quick Navigation")
-    quick_col1, quick_col2, quick_col3, quick_col4, quick_col5 = st.columns(5)
+    quick_col1, quick_col2, quick_col3, quick_col4, quick_col5, quick_col6 = st.columns(6)
     with quick_col1:
         if st.button("🤖 Start Chat", type="primary", use_container_width=True):
             st.switch_page("pages/Chat.py")
@@ -133,14 +133,17 @@ else:
         if st.button("📂 Upload Files", use_container_width=True):
             st.switch_page("pages/Documents.py")
     with quick_col3:
-        if st.button("🛠️ Document Tools", use_container_width=True):
+        if st.button("🛠️ Doc Tools", use_container_width=True):
             st.switch_page("pages/Document_Tools.py")
     with quick_col4:
         if st.button("📊 Analytics", use_container_width=True):
             st.switch_page("pages/Analytics.py")
     with quick_col5:
-        if st.button("⚡ LLM Benchmark", use_container_width=True):
+        if st.button("⚡ LLM Bench", use_container_width=True):
             st.switch_page("pages/LLM_Benchmark.py")
+    with quick_col6:
+        if st.button("🎯 Evaluation", use_container_width=True):
+            st.switch_page("pages/Evaluation_Performance.py")
 
     st.markdown("---")
 

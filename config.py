@@ -157,6 +157,25 @@ DEFAULT_STRUCTURED_SCHEMA = os.environ.get("DEFAULT_STRUCTURED_SCHEMA", "general
 BENCHMARK_RESULTS_DIR = DATA_DIR / "benchmarks"
 BENCHMARK_RESULTS_DIR.mkdir(parents=True, exist_ok=True)
 
+# 23-27. Advanced Evaluation, Caching & Performance Configurations
+RAGAS_EVAL_DIR = DATA_DIR / "ragas_evals"
+RETRIEVAL_BENCHMARK_DIR = DATA_DIR / "retrieval_benchmarks"
+CACHE_DIR = DATA_DIR / "cache"
+INDEX_BACKUPS_DIR = DATA_DIR / "index_backups"
+
+for p in [RAGAS_EVAL_DIR, RETRIEVAL_BENCHMARK_DIR, CACHE_DIR, INDEX_BACKUPS_DIR]:
+    p.mkdir(parents=True, exist_ok=True)
+
+EMBEDDING_CACHE_ENABLED = os.environ.get("EMBEDDING_CACHE_ENABLED", "true").lower() in ("true", "1", "yes")
+QUERY_CACHE_ENABLED = os.environ.get("QUERY_CACHE_ENABLED", "true").lower() in ("true", "1", "yes")
+RETRIEVAL_CACHE_ENABLED = os.environ.get("RETRIEVAL_CACHE_ENABLED", "true").lower() in ("true", "1", "yes")
+LLM_CACHE_ENABLED = os.environ.get("LLM_CACHE_ENABLED", "false").lower() in ("true", "1", "yes")
+
+CACHE_MAX_ENTRIES = int(os.environ.get("CACHE_MAX_ENTRIES", 5000))
+CACHE_TTL_SECONDS = int(os.environ.get("CACHE_TTL_SECONDS", 86400))  # 24 hours
+ASYNC_WORKER_CONCURRENCY = int(os.environ.get("ASYNC_WORKER_CONCURRENCY", 3))
+INCREMENTAL_INDEXING_ENABLED = os.environ.get("INCREMENTAL_INDEXING_ENABLED", "true").lower() in ("true", "1", "yes")
+
 # Personalities for the Assistant
 ASSISTANT_PERSONALITIES = {
     "Professional": (
