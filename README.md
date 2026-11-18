@@ -194,21 +194,65 @@ Excel Engine    Deskew, CLAHE,   Chart Labels &               Metadata Filtering
     - **Hierarchical Map-Reduce Summarization**: Seamlessly handles documents exceeding LLM context windows by chunking into section batches, generating intermediate summaries, and synthesizing a consolidated final report.
     - Multilingual summarization (summarize Hindi/Gujarati documents in English or native language).
 
+### IV. Advanced Evaluation, Caching & Scalability (23–27)
+
+23. **RAGAS Evaluation Framework (`utils/ragas_evaluator.py`, `pages/Evaluation_Performance.py`)**:
+    - Deep evaluation of RAG quality metrics: **Faithfulness**, **Answer Relevancy**, **Context Precision**, **Context Recall**, **Answer Correctness**, and **Context Utilization**.
+    - Persistent SQLite storage in `ragas_evaluations` table with historical run comparison and JSON/CSV export.
+
+24. **Multi-Tier LRU Caching Architecture (`utils/cache_manager.py`)**:
+    - 5-layer caching system: Precomputed Embedding Cache, Query Analysis Cache, Multi-Tenant Retrieval Cache, Deterministic LLM Response Cache, and In-Memory Model Cache.
+    - User-isolated retrieval cache keys, MD5 hashing, TTL expiration, and automated cache invalidation upon document changes.
+
+25. **Standardized IR Retrieval Benchmarking (`utils/retrieval_benchmark.py`)**:
+    - Rigorous Information Retrieval metrics: **Recall@1/3/5/10**, **Mean Reciprocal Rank (MRR)**, **nDCG@5/10**, **Precision@K**, and **Hit Rate@K**.
+    - Real-time latency measurement (ms) and throughput benchmarking across BM25, FAISS, and Cross-Encoder configurations.
+
+26. **Asynchronous Background Processing Queue (`utils/async_processor.py`)**:
+    - Non-blocking ingestion pipeline with SQLite job queue and 10 tracked ingestion stages.
+    - ThreadPoolExecutor worker concurrency, live progress percentage updates, and automatic index compilation.
+
+27. **Scalable Vector Indexing & Memory Optimization (`utils/scalable_index.py`)**:
+    - Incremental indexing (`index.add()`) preventing expensive full-index rebuilds.
+    - Automated point-in-time index snapshots, crash recovery, and real-time process RAM/CPU monitoring.
+
+### V. Security, Access Control & Deployment Upgrade (28–33)
+
+28. **Role-Based Access Control (RBAC) (`utils/auth.py`, `pages/Admin.py`)**:
+    - Three role tiers: **Admin** (full system control, user management, audit logs), **Editor** (upload, process, chat, manage own docs), **Viewer** (read-only search, chat, citations).
+    - Enterprise **bcrypt** password hashing with automatic zero-downtime migration from legacy PBKDF2 hashes.
+    - Privilege escalation prevention and deactivated account session rejection.
+
+29. **Document-Level Permissions & Security Filtering (`utils/database.py`, `utils/rag.py`, `pages/Documents.py`)**:
+    - Granular permission levels: **Owner**, **Editor**, **Viewer**, **No Access**.
+    - Real-time RAG pipeline security: BM25, FAISS, rank fusion, reranker, and LLM context prompt strictly filter unauthorized document chunks.
+    - Fine-grained document sharing and primary ownership transfer.
+
+30. **Enterprise Docker Deployment (`Dockerfile`, `docker-compose.yml`, `.env.example`)**:
+    - Multi-stage Dockerfile based on `python:3.11-slim` with system Tesseract OCR, Poppler, and OpenCV libraries.
+    - Multi-service orchestration: PostgreSQL 16 database, FastAPI REST backend (port 8000), Streamlit frontend (port 8501).
+    - Hardened security with non-root system user (`corpususer`, uid=1000) and persistent container volumes.
+
+31. **PostgreSQL Relational Integration & Migrations (`utils/models.py`, `alembic/`, `scripts/migrate_sqlite_to_postgres.py`)**:
+    - Seamless dual database engine support: SQLite for local development, PostgreSQL with connection pooling (`QueuePool`) for production.
+    - Declarative SQLAlchemy models and automated **Alembic** migrations.
+    - Production migration script (`scripts/migrate_sqlite_to_postgres.py`) with foreign key dependency ordering and sequence synchronization.
+
+32. **RESTful API Development with FastAPI (`api/main.py`, `api/routers/`, `api/schemas.py`)**:
+    - High-performance asynchronous REST API with automatic **Swagger UI** (`/docs`) and **ReDoc** (`/redoc`).
+    - Endpoints for Authentication (JWT bearer), Users, Documents, Permissions, Hybrid Search, Conversational RAG, Streaming SSE, and Audit Logs.
+    - In-memory sliding window IP rate limiting and comprehensive Pydantic v2 validation.
+
+33. **Security Audit Logging System (`utils/audit.py`, `pages/Admin.py`)**:
+    - Tamper-evident persistent audit trail recording all auth attempts, document events, permission modifications, and RAG queries.
+    - Zero sensitive data leakage: automatic redaction of passwords, tokens, API keys, and private content.
+    - Multi-attribute filtering (user, action, status, date) and one-click CSV report export.
+
 ---
 
 ## 🛠️ Installation & Setup
 
-### 1. Prerequisites
-- **Python 3.11+**
-- (Optional) **Ollama** installed from [ollama.com](https://ollama.com) for local offline LLMs:
-  ```bash
-  ollama pull llama3.2
-  ```
-- (Optional) **Tesseract OCR** for image and photo recognition:
-  - Windows: [UB-Mannheim Tesseract Installer](https://github.com/UB-Mannheim/tesseract/wiki) (default: `C:\Program Files\Tesseract-OCR\tesseract.exe`)
-  - For Hindi & Gujarati OCR support, check the *Additional language data (download)* option in the Tesseract installer.
-
-### 2. Clone and Install Dependencies
+### 1. Local Development (SQLite)
 ```bash
 git clone https://github.com/divydhaduk18/corpus-mind-second.git
 cd corpus-mind-second
@@ -220,33 +264,49 @@ venv\Scripts\activate
 source venv/bin/activate
 
 pip install -r requirements.txt
-```
-
-### 3. Environment Configuration
-Copy `.env.example` to `.env`:
-```bash
 cp .env.example .env
-```
-Configure your endpoints or cloud API keys as needed:
-```ini
-DEFAULT_LLM_PROVIDER=ollama
-OLLAMA_API_URL=http://localhost:11434
 
-# Cloud API Keys (Optional)
-OPENAI_API_KEY=your_openai_api_key
-GEMINI_API_KEY=your_gemini_api_key
-ANTHROPIC_API_KEY=your_anthropic_api_key
-```
-
-### 4. Run the Application
-```bash
+# Run Streamlit Web Application:
 streamlit run app.py
+
+# Run FastAPI REST API Backend:
+uvicorn api.main:app --host 0.0.0.0 --port 8000 --reload
 ```
-Open your browser at `http://localhost:8501`.
+
+### 2. Enterprise Docker Deployment (PostgreSQL + FastAPI + Streamlit)
+```bash
+# Build and start all services (PostgreSQL, FastAPI, Streamlit):
+docker compose up --build -d
+
+# Check service health:
+docker compose ps
+```
+- Streamlit Web Portal: `http://localhost:8501`
+- FastAPI Interactive Swagger Docs: `http://localhost:8000/docs`
+- FastAPI ReDoc API Reference: `http://localhost:8000/redoc`
 
 ---
 
 ## 🧪 Running Automated Tests
+
+Corpus Mind includes a comprehensive, modular test suite covering all 33 improvements:
+
+```powershell
+# Set offline mode for Hugging Face if models are already cached
+$env:HF_HUB_OFFLINE="1"
+
+# Run RBAC, Permissions, FastAPI, and Audit tests (Phases 15–16):
+python -m unittest tests/test_phase15_rbac_and_permissions.py tests/test_phase16_fastapi_and_audit.py
+
+# Run Caching, Async Ingestion, RAGAS & Benchmarks (Phases 13–14):
+python -m unittest tests/test_phase13_caching_and_async.py tests/test_phase14_ragas_and_benchmarks.py
+
+# Run Table Extraction, Multilingual OCR, Excel, Visual RAG, Diff & Summarizer tests (Phases 11–12):
+python -m unittest tests/test_phase11_tables_and_ocr.py tests/test_phase12_excel_visual_diff_summary.py
+
+# Run all LLM Provider, Prompt, and Benchmark tests (Phases 8–10):
+python -m unittest tests/test_phase8_llm_providers.py tests/test_phase9_prompts_and_schemas.py tests/test_phase10_llm_benchmark.py
+```
 
 Corpus Mind includes a comprehensive, modular test suite covering all 22 improvements:
 

@@ -1,0 +1,115 @@
+services:
+  # ------------------------------------------
+  # Service 1: PostgreSQL Enterprise Database
+  # ------------------------------------------
+  db:
+    image: postgres:16-alpine
+    container_name: corpusmind-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-corpus_user}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-corpus_secure_password_123}
+      POSTGRES_DB: ${POSTGRES_DB:-corpus_mind}
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-corpus_user} -d ${POSTGRES_DB:-corpus_mind}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - corpus-network
+
+  # ------------------------------------------
+  # Service 2: FastAPI REST API Backend
+  # ------------------------------------------
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: corpusmind-api
+    restart: unless-stopped
+    command: ["uvicorn", "api.main:app", "--host", "0.0.0.0", "--port", "8000"]
+    ports:
+      - "${API_PORT:-8000}:8000"
+    environment:
+      - DATABASE_URL=postgresql+psycopg2://${POSTGRES_USER:-corpus_user}:${POSTGRES_PASSWORD:-corpus_secure_password_123}@db:5432/${POSTGRES_DB:-corpus_mind}
+      - JWT_SECRET_KEY=${JWT_SECRET_KEY:-corpus-mind-jwt-secret-key-production-change-me-32chars}
+      - JWT_ALGORITHM=HS256
+      - JWT_ACCESS_TOKEN_EXPIRE_MINUTES=1440
+      - OLLAMA_API_URL=${OLLAMA_API_URL:-http://host.docker.internal:11434}
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      - GEMINI_API_KEY=${GEMINI_API_KEY:-}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+      - DEFAULT_LLM_PROVIDER=${DEFAULT_LLM_PROVIDER:-ollama}
+      - DEFAULT_EMBEDDING_MODEL=${DEFAULT_EMBEDDING_MODEL:-all-MiniLM-L6-v2}
+      - AUDIT_LOGS_ENABLED=true
+    volumes:
+      - corpus_uploads:/app/uploads
+      - corpus_vector_store:/app/vector_store
+      - corpus_data:/app/data
+    depends_on:
+      db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+    networks:
+      - corpus-network
+
+  # ------------------------------------------
+  # Service 3: Streamlit Web UI Frontend
+  # ------------------------------------------
+  frontend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: corpusmind-frontend
+    restart: unless-stopped
+    command: ["streamlit", "run", "app.py", "--server.port=8501", "--server.address=0.0.0.0"]
+    ports:
+      - "${STREAMLIT_PORT:-8501}:8501"
+    environment:
+      - DATABASE_URL=postgresql+psycopg2://${POSTGRES_USER:-corpus_user}:${POSTGRES_PASSWORD:-corpus_secure_password_123}@db:5432/${POSTGRES_DB:-corpus_mind}
+      - OLLAMA_API_URL=${OLLAMA_API_URL:-http://host.docker.internal:11434}
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      - GEMINI_API_KEY=${GEMINI_API_KEY:-}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+      - DEFAULT_LLM_PROVIDER=${DEFAULT_LLM_PROVIDER:-ollama}
+      - DEFAULT_EMBEDDING_MODEL=${DEFAULT_EMBEDDING_MODEL:-all-MiniLM-L6-v2}
+      - RERANKING_ENABLED=true
+      - AUDIT_LOGS_ENABLED=true
+    volumes:
+      - corpus_uploads:/app/uploads
+      - corpus_vector_store:/app/vector_store
+      - corpus_data:/app/data
+    depends_on:
+      db:
+        condition: service_healthy
+      api:
+        condition: service_started
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8501/_stcore/health"]
+      interval: 20s
+      timeout: 5s
+      retries: 3
+    networks:
+      - corpus-network
+
+volumes:
+  pgdata:
+    driver: local
+  corpus_uploads:
+    driver: local
+  corpus_vector_store:
+    driver: local
+  corpus_data:
+    driver: local
+
+networks:
+  corpus-network:
+    driver: bridge

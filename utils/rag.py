@@ -353,11 +353,14 @@ class RAGManager:
 
     @classmethod
     def rebuild_user_index(cls, user_id: int, strategy: Optional[str] = None) -> Tuple[bool, int, int]:
-        """Rebuild vector & BM25 index exclusively for a specific authenticated user."""
+        """Rebuild vector & BM25 index exclusively for a specific authenticated user.
+        
+        Indexes all documents accessible to the user (owned or explicitly shared).
+        """
         from utils.document_loader import DocumentLoader
         from utils.text_splitter import RecursiveTextSplitter
 
-        user_docs = db.get_documents_by_user(user_id)
+        user_docs = db.get_accessible_documents(user_id)
         if not user_docs:
             for path in [cls.get_user_index_path(user_id), cls.get_user_metadata_path(user_id)]:
                 if os.path.exists(path):
@@ -508,9 +511,16 @@ class RAGManager:
     def _matches_filters(
         item: Dict[str, Any], 
         doc_filter: Optional[List[str]] = None, 
-        metadata_filters: Optional[Dict[str, Any]] = None
+        metadata_filters: Optional[Dict[str, Any]] = None,
+        accessible_doc_ids: Optional[set] = None
     ) -> bool:
-        """Evaluate whether a metadata item satisfies document name and metadata filters."""
+        """Evaluate whether a metadata item satisfies document name, metadata, and RBAC permission filters."""
+        # Security Enforcement: verify chunk belongs to an accessible document
+        if accessible_doc_ids is not None:
+            chunk_doc_id = item.get('doc_id')
+            if chunk_doc_id is not None and chunk_doc_id not in accessible_doc_ids:
+                return False
+
         if doc_filter and item.get('file_name') not in doc_filter:
             return False
 
@@ -560,7 +570,8 @@ class RAGManager:
         dense_weight: float = 0.5,
         sparse_weight: float = 0.5,
         doc_filter: Optional[List[str]] = None,
-        metadata_filters: Optional[Dict[str, Any]] = None
+        metadata_filters: Optional[Dict[str, Any]] = None,
+        accessible_doc_ids: Optional[set] = None
     ) -> List[Dict[str, Any]]:
         """Retrieve candidate chunks for a single search query."""
         # 1. Sparse BM25 Search
@@ -582,14 +593,14 @@ class RAGManager:
         except Exception as dense_err:
             logger.error(f"Dense search error for query '{query}': {dense_err}")
 
-        # 3. Filter candidates by metadata & document name
+        # 3. Filter candidates by metadata, document name, and RBAC permissions
         filtered_dense = [
             (score, idx) for score, idx in dense_results 
-            if cls._matches_filters(state.metadata[idx], doc_filter=doc_filter, metadata_filters=metadata_filters)
+            if cls._matches_filters(state.metadata[idx], doc_filter=doc_filter, metadata_filters=metadata_filters, accessible_doc_ids=accessible_doc_ids)
         ]
         filtered_bm25 = [
             (score, idx) for score, idx in bm25_results 
-            if cls._matches_filters(state.metadata[idx], doc_filter=doc_filter, metadata_filters=metadata_filters)
+            if cls._matches_filters(state.metadata[idx], doc_filter=doc_filter, metadata_filters=metadata_filters, accessible_doc_ids=accessible_doc_ids)
         ]
 
         raw_candidates = []
@@ -731,6 +742,9 @@ class RAGManager:
 
         candidate_k = max(top_k * 4, 20)
 
+        # Resolve accessible document IDs for RBAC & document-level security
+        accessible_doc_ids = set(db.get_accessible_document_ids(user_id))
+
         # 1. Multi-Query Expansion
         if use_multi_q and search_mode in ("hybrid", "dense", "bm25"):
             query_variations = QueryProcessor.generate_multi_queries(query, num_queries=num_multi_q)
@@ -749,7 +763,8 @@ class RAGManager:
                 dense_weight=w_dense,
                 sparse_weight=w_sparse,
                 doc_filter=doc_filter,
-                metadata_filters=metadata_filters
+                metadata_filters=metadata_filters,
+                accessible_doc_ids=accessible_doc_ids
             )
         else:
             # Multi-query RRF combination
@@ -768,7 +783,8 @@ class RAGManager:
                     dense_weight=w_dense,
                     sparse_weight=w_sparse,
                     doc_filter=doc_filter,
-                    metadata_filters=metadata_filters
+                    metadata_filters=metadata_filters,
+                    accessible_doc_ids=accessible_doc_ids
                 )
                 for rank, c in enumerate(q_candidates, start=1):
                     cid = c['chunk_id']
@@ -827,4 +843,19 @@ class RAGManager:
             )
 
         # 6. Deduplicate redundant passages and return final top_k
-        return cls._deduplicate_chunks(candidates, max_items=top_k)
+        final_results = cls._deduplicate_chunks(candidates, max_items=top_k)
+
+        # Record audit log for RAG retrieval
+        try:
+            from utils.audit import AuditLogger, ACTION_RAG_SEARCH
+            AuditLogger.log(
+                action=ACTION_RAG_SEARCH,
+                user_id=user_id,
+                resource_type="rag",
+                status="SUCCESS",
+                details={"query": query[:120], "search_mode": search_mode, "chunks_retrieved": len(final_results)}
+            )
+        except Exception:
+            pass
+
+        return final_results

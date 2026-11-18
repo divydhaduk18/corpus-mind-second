@@ -13,11 +13,17 @@ from utils.document_loader import DocumentLoader
 from utils.text_splitter import RecursiveTextSplitter
 from utils.rag import RAGManager
 from utils.ocr import OCRManager
+from utils.audit import (
+    AuditLogger, ACTION_DOC_UPLOAD, ACTION_DOC_VIEW, ACTION_DOC_DELETE,
+    ACTION_DOC_PERM_GRANT, ACTION_DOC_PERM_REVOKE, ACTION_DOC_OWNERSHIP_TRANSFER
+)
 
 # Guard Page Access
 AuthManager.require_auth()
 
 user_id = st.session_state.user_id
+user_role = st.session_state.get("user_role", config.ROLE_EDITOR)
+can_upload = AuthManager.can_upload_document(user_role)
 
 # Page Styling
 css_path = config.CSS_DIR / "style.css"
@@ -66,11 +72,18 @@ tab_upload, tab_manage, tab_ocr, tab_search = st.tabs([
 # -----------------
 with tab_upload:
     st.header("Upload Files for RAG Indexing")
-    st.markdown(
-        "Upload document files (**PDF, DOCX, TXT, MD, CSV, JSON**) or image files (**PNG, JPG, JPEG, WEBP, BMP, TIFF**). "
-        "Text is extracted automatically via high-speed native extractors (**PyMuPDF**) or **Tesseract OCR / RapidOCR**, "
-        "split into semantic chunks with page citations, and indexed into your private vector store."
-    )
+    if not can_upload:
+        st.warning(
+            "🔒 **Upload Restricted:** Your account has the **Viewer** role. "
+            "Viewers have read-only access and cannot upload documents. "
+            "Please contact an Administrator to request **Editor** privileges."
+        )
+    else:
+        st.markdown(
+            "Upload document files (**PDF, DOCX, TXT, MD, CSV, JSON**) or image files (**PNG, JPG, JPEG, WEBP, BMP, TIFF**). "
+            "Text is extracted automatically via high-speed native extractors (**PyMuPDF**) or **Tesseract OCR / RapidOCR**, "
+            "split into semantic chunks with page citations, and indexed into your private vector store."
+        )
     
     supported_types = ["pdf", "docx", "txt", "md", "csv", "json", "png", "jpg", "jpeg", "webp", "bmp", "tiff"]
     uploaded_files = st.file_uploader(
@@ -213,8 +226,8 @@ with tab_upload:
 with tab_manage:
     st.header("Indexed Documents & Images")
     
-    # Retrieve user docs strictly for this authenticated user
-    docs = db.get_documents_by_user(user_id)
+    # Retrieve all documents accessible to this authenticated user (owned + shared)
+    docs = db.get_accessible_documents(user_id)
     
     # Format counts
     total_size = sum(doc['file_size'] for doc in docs) / (1024.0 * 1024.0) if docs else 0.0
@@ -226,7 +239,7 @@ with tab_manage:
         f"""
         <div class="stat-container" style="margin-bottom: 20px;">
             <div class="stat-card">
-                <h4>Total Files</h4>
+                <h4>Accessible Files</h4>
                 <div class="stat-value">{len(docs)}</div>
                 <small style="color:#9ca3af;">{doc_count} Docs | {img_count} OCR Images</small>
             </div>
@@ -238,7 +251,7 @@ with tab_manage:
             <div class="stat-card">
                 <h4>Storage Footprint</h4>
                 <div class="stat-value">{total_size:.2f} MB</div>
-                <small style="color:#9ca3af;">Private Upload Directory</small>
+                <small style="color:#9ca3af;">Accessible Knowledge Base</small>
             </div>
         </div>
         """,
@@ -246,7 +259,7 @@ with tab_manage:
     )
     
     if st.button("🔄 Rebuild My Hybrid RAG Index", use_container_width=True):
-        with st.spinner("Reindexing your active documents..."):
+        with st.spinner("Reindexing your accessible documents..."):
             success, docs_c, chunks_c = RAGManager.rebuild_user_index(user_id)
             if success:
                 st.success(f"Index rebuilt successfully! Indexed {docs_c} files with {chunks_c} total chunks.")
@@ -257,34 +270,116 @@ with tab_manage:
     st.markdown("---")
     
     if docs:
+        all_sys_users = db.get_all_users()
         for doc in docs:
             ext = Path(doc['file_name']).suffix.lower()
             icon = "🖼️" if ext in config.SUPPORTED_IMAGE_EXTENSIONS else ("📊" if ext == ".csv" else "📄")
+            eff_perm = doc.get("effective_permission", "owner")
             
+            # Permission Badge
+            if eff_perm == "owner":
+                perm_badge = "👑 Owner"
+                perm_color = "#10b981"
+            elif eff_perm == "editor":
+                perm_badge = "✏️ Editor"
+                perm_color = "#3b82f6"
+            else:
+                perm_badge = "👁️ Viewer"
+                perm_color = "#6b7280"
+
             with st.container():
-                col1, col2, col3, col4 = st.columns([3, 1, 1, 1])
+                col1, col2, col3, col4, col5 = st.columns([3, 1, 1, 1, 1])
                 with col1:
-                    st.write(f"{icon} **{doc['file_name']}**")
+                    owner_info = f" (Owner: {doc.get('owner_username', 'You')})" if doc.get('owner_username') and doc.get('user_id') != user_id else ""
+                    st.write(f"{icon} **{doc['file_name']}**{owner_info}")
                 with col2:
-                    st.write(f"💾 {doc['file_size']/1024.0:.1f} KB")
+                    st.markdown(
+                        f'<span style="background-color:{perm_color}; color:white; padding:2px 8px; border-radius:10px; font-size:11px; font-weight:bold;">{perm_badge}</span>',
+                        unsafe_allow_html=True
+                    )
                 with col3:
-                    st.write(f"🧩 {doc['chunk_count']} chunks")
+                    st.write(f"💾 {doc['file_size']/1024.0:.1f} KB")
                 with col4:
-                    if st.button("🗑️ Delete", key=f"del_{doc['id']}", use_container_width=True):
-                        # Enforce user authorization on deletion
-                        deleted = db.delete_document(doc['id'], user_id=user_id)
-                        if deleted:
-                            with st.spinner("Updating Vector Store Index..."):
-                                RAGManager.rebuild_user_index(user_id)
-                            db.log_analytics(user_id, "document_delete", f"Deleted {doc['file_name']}")
-                            st.rerun()
+                    st.write(f"🧩 {doc['chunk_count']} chunks")
+                with col5:
+                    can_delete = (eff_perm == "owner" or is_admin)
+                    if can_delete:
+                        if st.button("🗑️ Delete", key=f"del_{doc['id']}", use_container_width=True):
+                            deleted = db.delete_document(doc['id'], user_id=user_id)
+                            if deleted:
+                                AuditLogger.log(
+                                    action=ACTION_DOC_DELETE,
+                                    user_id=user_id,
+                                    username=st.session_state.username,
+                                    resource_type="document",
+                                    resource_id=doc['id'],
+                                    status="SUCCESS",
+                                    details={"file_name": doc['file_name']}
+                                )
+                                with st.spinner("Updating Vector Store Index..."):
+                                    RAGManager.rebuild_user_index(user_id)
+                                st.rerun()
+                            else:
+                                st.error("Could not delete file.")
+                    else:
+                        st.caption("🔒 Read-Only")
+
+                # Document sharing controls for owners and administrators
+                if eff_perm == "owner" or is_admin:
+                    with st.expander(f"🤝 Share & Permissions: {doc['file_name']}"):
+                        current_p = db.get_document_permissions(doc['id'])
+                        if current_p:
+                            st.write("**Currently Shared With:**")
+                            for p in current_p:
+                                st.write(f"- **{p['user_name']}**: `{p['permission_level']}` (granted {p['created_at'][:10]})")
                         else:
-                            st.error("Could not delete file: Unauthorized or not found.")
-                
+                            st.caption("This document is private to you.")
+                            
+                        col_s1, col_s2, col_s3 = st.columns([2, 1, 1])
+                        with col_s1:
+                            target_share_user = st.selectbox(
+                                "Share with User",
+                                options=[u['username'] for u in all_sys_users if u['id'] != user_id],
+                                key=f"share_u_{doc['id']}"
+                            )
+                        with col_s2:
+                            share_lvl = st.selectbox(
+                                "Access Level",
+                                options=["viewer", "editor", "none"],
+                                key=f"share_lvl_{doc['id']}"
+                            )
+                        with col_s3:
+                            st.markdown("<div style='height:28px'></div>", unsafe_allow_html=True)
+                            if st.button("Update Share", key=f"btn_share_{doc['id']}", use_container_width=True):
+                                tu = db.get_user_by_username(target_share_user)
+                                if tu:
+                                    db.grant_document_permission(doc['id'], tu['id'], share_lvl, granted_by=user_id)
+                                    AuditLogger.log(
+                                        action=ACTION_DOC_PERM_GRANT if share_lvl != "none" else ACTION_DOC_PERM_REVOKE,
+                                        user_id=user_id,
+                                        username=st.session_state.username,
+                                        resource_type="document",
+                                        resource_id=doc['id'],
+                                        status="SUCCESS",
+                                        details={"target_user": target_share_user, "permission": share_lvl}
+                                    )
+                                    # Trigger reindexing for the target user so shared doc is available immediately
+                                    RAGManager.rebuild_user_index(tu['id'])
+                                    st.success(f"Updated access for {target_share_user} to '{share_lvl}'.")
+                                    st.rerun()
+
                 with st.expander(f"👁️ View Extracted Text Preview: {doc['file_name']}"):
                     if os.path.exists(doc['file_path']):
                         preview_text = DocumentLoader.load_document(doc['file_path'])
                         st.text_area("Extracted Content", preview_text[:1500] + ("..." if len(preview_text) > 1500 else ""), height=150, key=f"prev_{doc['id']}")
+                        AuditLogger.log(
+                            action=ACTION_DOC_VIEW,
+                            user_id=user_id,
+                            username=st.session_state.username,
+                            resource_type="document",
+                            resource_id=doc['id'],
+                            status="SUCCESS"
+                        )
                     else:
                         st.warning("File binary missing on disk.")
     else:
@@ -295,9 +390,16 @@ with tab_manage:
 # -----------------
 with tab_ocr:
     st.header("Extract & Index Text from Images")
-    st.markdown("Upload any image (PNG, JPG, JPEG, WEBP, BMP, TIFF) to run multi-pass OCR with OpenCV CLAHE preprocessing and confidence evaluation.")
-    
-    ocr_file = st.file_uploader("Upload Image File for OCR", type=["png", "jpg", "jpeg", "webp", "bmp", "tiff"], key="ocr_tab_uploader")
+    if not can_upload:
+        st.warning(
+            "🔒 **OCR Ingestion Restricted:** Your account has the **Viewer** role. "
+            "Viewers have read-only access and cannot index new images into the knowledge base. "
+            "Please contact an Administrator to request **Editor** privileges."
+        )
+    else:
+        st.markdown("Upload any image (PNG, JPG, JPEG, WEBP, BMP, TIFF) to run multi-pass OCR with OpenCV CLAHE preprocessing and confidence evaluation.")
+        
+        ocr_file = st.file_uploader("Upload Image File for OCR", type=["png", "jpg", "jpeg", "webp", "bmp", "tiff"], key="ocr_tab_uploader")
     
     if ocr_file:
         st.image(ocr_file, caption=f"Uploaded Image: {ocr_file.name}", use_container_width=True)

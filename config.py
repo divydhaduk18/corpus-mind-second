@@ -195,3 +195,35 @@ ASSISTANT_PERSONALITIES = {
         "Write clean, well-commented, and efficient code. Explain your design decisions briefly."
     )
 }
+
+# 28-33. RBAC, Document Permissions, PostgreSQL, FastAPI & Audit Logging
+ROLE_ADMIN = "admin"
+ROLE_EDITOR = "editor"
+ROLE_VIEWER = "viewer"
+VALID_ROLES = [ROLE_ADMIN, ROLE_EDITOR, ROLE_VIEWER]
+
+PERM_OWNER = "owner"
+PERM_EDITOR = "editor"
+PERM_VIEWER = "viewer"
+PERM_NONE = "none"
+VALID_PERMISSIONS = [PERM_OWNER, PERM_EDITOR, PERM_VIEWER, PERM_NONE]
+
+# Dual DB Configuration: SQLite (local/dev) or PostgreSQL (production)
+DATABASE_URL = os.environ.get("DATABASE_URL", f"sqlite:///{DB_PATH}")
+IS_POSTGRES = DATABASE_URL.startswith("postgresql")
+DB_POOL_SIZE = int(os.environ.get("DB_POOL_SIZE", 10))
+DB_MAX_OVERFLOW = int(os.environ.get("DB_MAX_OVERFLOW", 20))
+DB_POOL_TIMEOUT = int(os.environ.get("DB_POOL_TIMEOUT", 30))
+
+# FastAPI REST API & JWT Configuration
+API_HOST = os.environ.get("API_HOST", "0.0.0.0")
+API_PORT = int(os.environ.get("API_PORT", 8000))
+JWT_SECRET_KEY = os.environ.get("JWT_SECRET_KEY", "corpus-mind-jwt-secret-key-production-change-me-32chars")
+JWT_ALGORITHM = os.environ.get("JWT_ALGORITHM", "HS256")
+JWT_ACCESS_TOKEN_EXPIRE_MINUTES = int(os.environ.get("JWT_ACCESS_TOKEN_EXPIRE_MINUTES", 1440))
+CORS_ORIGINS = [orig.strip() for orig in os.environ.get("CORS_ORIGINS", "*").split(",") if orig.strip()]
+RATE_LIMIT_PER_MINUTE = int(os.environ.get("RATE_LIMIT_PER_MINUTE", 120))
+
+# Audit Logging Configuration
+AUDIT_LOGS_ENABLED = os.environ.get("AUDIT_LOGS_ENABLED", "true").lower() in ("true", "1", "yes")
+
