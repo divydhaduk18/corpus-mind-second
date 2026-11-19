@@ -814,17 +814,45 @@ class DatabaseManager:
         )
 
     def get_analytics_summary(self) -> Dict[str, Any]:
-        """Calculates system-wide analytics."""
+        """Calculates system-wide analytics including model usage and message history."""
         total_queries = self._execute("SELECT COUNT(*) as count FROM analytics_logs WHERE event_type = 'query'", fetch_one=True)
         total_docs = self._execute("SELECT COUNT(*) as count FROM documents", fetch_one=True)
         total_users = self._execute("SELECT COUNT(*) as count FROM users", fetch_one=True)
         avg_resp = self._execute("SELECT AVG(response_time_ms) as avg_time FROM analytics_logs WHERE event_type = 'query'", fetch_one=True)
+
         # Count user messages from messages table (falls back to query count if table missing)
         try:
             total_msgs = self._execute("SELECT COUNT(*) as count FROM messages WHERE role = 'user'", fetch_one=True)
             user_messages = total_msgs["count"] if total_msgs else 0
         except Exception:
             user_messages = total_queries["count"] if total_queries else 0
+
+        # Model usage distribution: list of (model_name, count) tuples
+        try:
+            model_rows = self._execute(
+                "SELECT model_used, COUNT(*) as cnt FROM analytics_logs WHERE model_used IS NOT NULL GROUP BY model_used ORDER BY cnt DESC",
+                fetch_all=True
+            )
+            model_usage = [(r["model_used"], r["cnt"]) for r in model_rows] if model_rows else []
+        except Exception:
+            model_usage = []
+
+        # Message volume per day: list of (date_str, count) tuples — tries messages table first
+        try:
+            hist_rows = self._execute(
+                "SELECT DATE(timestamp) as day, COUNT(*) as cnt FROM messages WHERE role = 'user' GROUP BY day ORDER BY day ASC",
+                fetch_all=True
+            )
+            msg_history = [(r["day"], r["cnt"]) for r in hist_rows] if hist_rows else []
+        except Exception:
+            try:
+                hist_rows = self._execute(
+                    "SELECT DATE(timestamp) as day, COUNT(*) as cnt FROM analytics_logs WHERE event_type = 'query' GROUP BY day ORDER BY day ASC",
+                    fetch_all=True
+                )
+                msg_history = [(r["day"], r["cnt"]) for r in hist_rows] if hist_rows else []
+            except Exception:
+                msg_history = []
 
         total_q = total_queries["count"] if total_queries else 0
 
@@ -833,7 +861,10 @@ class DatabaseManager:
             "total_user_messages": user_messages,
             "total_documents": total_docs["count"] if total_docs else 0,
             "total_users": total_users["count"] if total_users else 0,
-            "avg_response_time_ms": round(avg_resp["avg_time"] or 0, 2) if avg_resp else 0
+            "avg_response_time_ms": round(avg_resp["avg_time"] or 0, 2) if avg_resp else 0,
+            "model_usage": model_usage,
+            "msg_history": msg_history,
+            "total_size_bytes": 0,  # legacy key kept for backward compatibility
         }
 
     # ==========================================

@@ -46,9 +46,9 @@ st.markdown("System metrics tracking conversation volume, response latency, and 
 # Retrieve stats
 stats = db.get_analytics_summary()
 
-total_chats = stats["total_user_messages"]
-total_docs = stats["total_documents"]
-avg_latency_ms = stats["avg_response_time_ms"]
+total_chats = stats.get("total_user_messages", stats.get("total_queries", 0))
+total_docs = stats.get("total_documents", 0)
+avg_latency_ms = stats.get("avg_response_time_ms", 0)
 avg_latency_sec = avg_latency_ms / 1000.0
 
 st.markdown(
@@ -78,7 +78,7 @@ col1, col2 = st.columns(2)
 
 with col1:
     st.subheader("Model Usage Distribution")
-    model_usage = stats["model_usage"]
+    model_usage = stats.get("model_usage", [])
     
     if model_usage:
         model_names = [m[0] for m in model_usage]
@@ -109,7 +109,7 @@ with col1:
 
 with col2:
     st.subheader("Chats Volume Over Time")
-    msg_history = stats["msg_history"]
+    msg_history = stats.get("msg_history", [])
     
     if msg_history:
         dates = [row[0] for row in msg_history]
