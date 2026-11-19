@@ -819,9 +819,18 @@ class DatabaseManager:
         total_docs = self._execute("SELECT COUNT(*) as count FROM documents", fetch_one=True)
         total_users = self._execute("SELECT COUNT(*) as count FROM users", fetch_one=True)
         avg_resp = self._execute("SELECT AVG(response_time_ms) as avg_time FROM analytics_logs WHERE event_type = 'query'", fetch_one=True)
-        
+        # Count user messages from messages table (falls back to query count if table missing)
+        try:
+            total_msgs = self._execute("SELECT COUNT(*) as count FROM messages WHERE role = 'user'", fetch_one=True)
+            user_messages = total_msgs["count"] if total_msgs else 0
+        except Exception:
+            user_messages = total_queries["count"] if total_queries else 0
+
+        total_q = total_queries["count"] if total_queries else 0
+
         return {
-            "total_queries": total_queries["count"] if total_queries else 0,
+            "total_queries": total_q,
+            "total_user_messages": user_messages,
             "total_documents": total_docs["count"] if total_docs else 0,
             "total_users": total_users["count"] if total_users else 0,
             "avg_response_time_ms": round(avg_resp["avg_time"] or 0, 2) if avg_resp else 0

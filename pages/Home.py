@@ -61,9 +61,9 @@ except Exception as e:
         "msg_history": []
     }
 
-total_chats = stats["total_user_messages"]
-total_docs = stats["total_documents"]
-avg_latency = stats["avg_response_time_ms"] / 1000.0  # seconds
+total_chats = stats.get("total_user_messages", stats.get("total_queries", 0))
+total_docs = stats.get("total_documents", 0)
+avg_latency = stats.get("avg_response_time_ms", 0) / 1000.0  # seconds
 
 # Render Cards using HTML & CSS classes
 st.markdown(
